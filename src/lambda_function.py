@@ -7,21 +7,31 @@ telegram_bot_token = os.environ['TELEGRAM_BOT_TOKEN']
 teams_table_name = os.environ['TEAMS_TABLE_NAME']
 
 
+# lambda and telegram helpers
+
 def send_message(text, chat_id):
     url = "https://api.telegram.org/bot{}/sendMessage".format(telegram_bot_token)
     requests.get(url, params={'text': text, 'chat_id': chat_id})
 
 
-def get_teams_table():
-    return boto3.resource('dynamodb').Table(teams_table_name)
+def send_response(body={}, status=200):
+    return {
+        'statusCode': status,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps(body)
+    }
 
-
-# teams
 
 def find_team(alias):
     response = get_teams_table().get_item(Key={'alias': alias})
     if 'Item' in response:
         return response['Item']
+
+
+# teams helpers
+
+def get_teams_table():
+    return boto3.resource('dynamodb').Table(teams_table_name)
 
 
 def join_team(alias, member):
@@ -59,7 +69,7 @@ def list_teams(alias):
     return response['Item']['members']
 
 
-# commands
+# telegram commands
 
 def execute_command(command_name, command_arguments):
     command_function = 'command_' + str(command_name)
@@ -105,10 +115,14 @@ def lambda_handler(event, context):
         except BaseException as e:
             send_message("There was a problem performing your request. Please try again later.", chat_id)
 
+        return send_response()
+
     if resource == 'message_broadcast':
         team = find_team(body['team'])
-        if team:
-            for chat in team['members']:
-                send_message(body['message'], chat)
+        if not team:
+            return send_response({'sent': False, 'members': 0})
 
-    return {'statusCode': 200}
+        for chat in team['members']:
+            send_message(body['message'], chat)
+
+        return send_response({'sent': True, 'members': len(team['members'])})
